@@ -1,3 +1,8 @@
+//! An implementation of OAuth 1.0a. This is intended to be completely agnostic to all application
+//! details, so you might need to do some parts yourself. A minimal example is included.
+
+#![warn(missing_docs)]
+
 use hmac::{Hmac, Mac};
 use http_types::{Method, Url};
 use percent_encoding::{AsciiSet, PercentEncode, NON_ALPHANUMERIC};
@@ -19,6 +24,7 @@ fn percent_encode<T: ?Sized + AsRef<[u8]>>(data: &T) -> PercentEncode<'_> {
     percent_encoding::percent_encode(data.as_ref(), PERCENT_ENCODING_SET)
 }
 
+/// Encode OAuth parameters for an Authorization header.
 pub fn encode_auth_parameters(params: &BTreeMap<String, String>) -> String {
     let mut out = String::new();
     let params: BTreeMap<String, String> = params
@@ -42,7 +48,7 @@ pub fn encode_auth_parameters(params: &BTreeMap<String, String>) -> String {
     out
 }
 
-pub fn encode_url_parameters(params: &BTreeMap<String, String>) -> String {
+fn encode_url_parameters(params: &BTreeMap<String, String>) -> String {
     let mut out = String::new();
     let params: BTreeMap<String, String> = params
         .iter()
@@ -63,24 +69,32 @@ pub fn encode_url_parameters(params: &BTreeMap<String, String>) -> String {
     out
 }
 
+/// An OAuth token.
 #[derive(Clone)]
 pub struct Token(pub String);
 
+/// A client ID.
 #[derive(Clone)]
 pub struct ClientId(pub String);
 
+/// A client secret.
 #[derive(Clone)]
 pub struct ClientSecret(pub String);
 
+/// A token secret.
 #[derive(Clone)]
 pub struct TokenSecret(pub String);
 
+/// A signing key for OAuth.
 pub struct SigningKey {
+    /// The client secret.
     pub client_secret: ClientSecret,
+    /// The token secret.
     pub token_secret: Option<TokenSecret>,
 }
 
 impl SigningKey {
+    /// Create a signing key while already having a token.
     pub fn with_token(client_secret: ClientSecret, token_secret: TokenSecret) -> Self {
         Self {
             client_secret,
@@ -88,6 +102,7 @@ impl SigningKey {
         }
     }
 
+    /// Create a signing key before receiving a token.
     pub fn without_token(client_secret: ClientSecret) -> Self {
         Self {
             client_secret,
@@ -117,13 +132,17 @@ fn normalize_url(mut url: Url) -> Url {
     url
 }
 
+/// The components of an HTTP request that must be signed.
 pub struct SignableRequest {
+    /// The request method.
     pub method: Method,
     normalized_url: Url,
+    /// The request parameters from all sources.
     pub parameters: BTreeMap<String, String>,
 }
 
 impl SignableRequest {
+    /// Creates a new SignableRequest, normalizing the URL.
     pub fn new(method: Method, url: Url, parameters: BTreeMap<String, String>) -> Self {
         let normalized_url = normalize_url(url);
         Self {
@@ -133,12 +152,15 @@ impl SignableRequest {
         }
     }
 
+    /// Get the normalized URL.
     pub fn url(&self) -> &Url {
         &self.normalized_url
     }
 }
 
+/// Data that can be signed.
 pub trait Signable {
+    /// Get the raw bytes to be signed.
     fn to_bytes(&self) -> Cow<'_, [u8]>;
 }
 
@@ -174,12 +196,16 @@ impl Signable for SignableRequest {
     }
 }
 
+/// A signing method. RSA-SHA1 is not currently supported.
 pub enum SignatureMethod {
+    /// The HMAC-SHA1 signing method.
     HmacSha1,
+    /// The PLAINTEXT signing method.
     Plaintext,
 }
 
 impl SignatureMethod {
+    /// Sign data using this method and a key.
     pub fn sign(&self, data: &impl Signable, key: &SigningKey) -> String {
         let key = key.to_string();
         match self {
@@ -205,9 +231,11 @@ impl fmt::Display for SignatureMethod {
     }
 }
 
+/// A nonce.
 pub struct Nonce(String);
 
 impl Nonce {
+    /// Generate a new nonce.
     pub fn generate() -> Self {
         Self(thread_rng().sample_iter(Alphanumeric).take(16).collect())
     }
@@ -220,20 +248,36 @@ fn timestamp() -> u64 {
         .as_secs()
 }
 
+/// The main entrypoint to the API. Non-sensitive data required for all authenticated requests.
 pub struct OAuthData {
+    /// The client ID.
     pub client_id: ClientId,
+    /// The OAuth token.
     pub token: Option<Token>,
+    /// The signature method.
     pub signature_method: SignatureMethod,
+    /// The nonce.
     pub nonce: Nonce,
 }
 
+/// The type of endpoint to generate an Authorization header for.
 pub enum AuthorizationType {
-    RequestToken { callback: String },
-    AccessToken { verifier: String },
+    /// A request to the request token endpoint.
+    RequestToken {
+        /// The callback URL to be redirected to.
+        callback: String,
+    },
+    /// A request to the access token endpoint.
+    AccessToken {
+        /// The oauth_verifier received from authorization.
+        verifier: String,
+    },
+    /// A standard request made after authentication.
     Request,
 }
 
 impl OAuthData {
+    /// Generate an HTTP Authorization header.
     pub fn authorization(
         &self,
         mut req: SignableRequest,
@@ -255,6 +299,7 @@ impl OAuthData {
         format!("OAuth {}", encode_auth_parameters(&req.parameters))
     }
 
+    /// Get the OAuth parameters.
     pub fn parameters(&self) -> BTreeMap<String, String> {
         let mut params = BTreeMap::new();
         params.insert("oauth_consumer_key".into(), self.client_id.0.clone());
@@ -270,11 +315,15 @@ impl OAuthData {
         params
     }
 
+    /// Regenerate the nonce. This should be done at least between each identical request made
+    /// within a second.
     pub fn regen_nonce(&mut self) {
         self.nonce = Nonce::generate();
     }
 }
 
+/// Updates an OAuthData and SigningKey with the response from either the access token or request
+/// token endpoints.
 pub fn receive_token<'a>(
     data: &'a mut OAuthData,
     key: &mut SigningKey,
@@ -292,6 +341,7 @@ pub fn receive_token<'a>(
     Ok(token)
 }
 
+/// Gets the verifier string from a callback URL.
 pub fn get_verifier(callback: &Url) -> Result<String, serde_urlencoded::de::Error> {
     let query = callback.query().unwrap_or("");
     #[derive(serde::Deserialize)]
