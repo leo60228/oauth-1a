@@ -25,6 +25,7 @@ fn percent_encode<T: ?Sized + AsRef<[u8]>>(data: &T) -> PercentEncode<'_> {
 }
 
 /// Encode OAuth parameters for an Authorization header.
+#[must_use]
 pub fn encode_auth_parameters(params: &BTreeMap<String, String>) -> String {
     let mut out = String::new();
     let params: BTreeMap<String, String> = params
@@ -70,22 +71,23 @@ fn encode_url_parameters(params: &BTreeMap<String, String>) -> String {
 }
 
 /// An OAuth token.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Token(pub String);
 
 /// A client ID.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClientId(pub String);
 
 /// A client secret.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClientSecret(pub String);
 
 /// A token secret.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TokenSecret(pub String);
 
 /// A signing key for OAuth.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SigningKey {
     /// The client secret.
     pub client_secret: ClientSecret,
@@ -95,6 +97,7 @@ pub struct SigningKey {
 
 impl SigningKey {
     /// Create a signing key while already having a token.
+    #[must_use]
     pub fn with_token(client_secret: ClientSecret, token_secret: TokenSecret) -> Self {
         Self {
             client_secret,
@@ -103,6 +106,7 @@ impl SigningKey {
     }
 
     /// Create a signing key before receiving a token.
+    #[must_use]
     pub fn without_token(client_secret: ClientSecret) -> Self {
         Self {
             client_secret,
@@ -133,6 +137,7 @@ fn normalize_url(mut url: Url) -> Url {
 }
 
 /// The components of an HTTP request that must be signed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SignableRequest {
     /// The request method.
     pub method: Method,
@@ -142,7 +147,8 @@ pub struct SignableRequest {
 }
 
 impl SignableRequest {
-    /// Creates a new SignableRequest, normalizing the URL.
+    /// Creates a new `SignableRequest`, normalizing the URL.
+    #[must_use]
     pub fn new(method: Method, url: Url, parameters: BTreeMap<String, String>) -> Self {
         let normalized_url = normalize_url(url);
         Self {
@@ -153,6 +159,7 @@ impl SignableRequest {
     }
 
     /// Get the normalized URL.
+    #[must_use]
     pub fn url(&self) -> &Url {
         &self.normalized_url
     }
@@ -197,6 +204,7 @@ impl Signable for SignableRequest {
 }
 
 /// A signing method. RSA-SHA1 is not currently supported.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SignatureMethod {
     /// The HMAC-SHA1 signing method.
     HmacSha1,
@@ -206,7 +214,7 @@ pub enum SignatureMethod {
 
 impl SignatureMethod {
     /// Sign data using this method and a key.
-    pub fn sign(&self, data: &impl Signable, key: &SigningKey) -> String {
+    pub fn sign(self, data: &impl Signable, key: &SigningKey) -> String {
         let key = key.to_string();
         match self {
             Self::HmacSha1 => {
@@ -232,10 +240,12 @@ impl fmt::Display for SignatureMethod {
 }
 
 /// A nonce.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Nonce(String);
 
 impl Nonce {
     /// Generate a new nonce.
+    #[must_use]
     pub fn generate() -> Self {
         Self(thread_rng().sample_iter(Alphanumeric).take(16).collect())
     }
@@ -249,6 +259,7 @@ fn timestamp() -> u64 {
 }
 
 /// The main entrypoint to the API. Non-sensitive data required for all authenticated requests.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OAuthData {
     /// The client ID.
     pub client_id: ClientId,
@@ -261,6 +272,7 @@ pub struct OAuthData {
 }
 
 /// The type of endpoint to generate an Authorization header for.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AuthorizationType {
     /// A request to the request token endpoint.
     RequestToken {
@@ -278,6 +290,7 @@ pub enum AuthorizationType {
 
 impl OAuthData {
     /// Generate an HTTP Authorization header.
+    #[must_use]
     pub fn authorization(
         &self,
         mut req: SignableRequest,
@@ -300,6 +313,7 @@ impl OAuthData {
     }
 
     /// Get the OAuth parameters.
+    #[must_use]
     pub fn parameters(&self) -> BTreeMap<String, String> {
         let mut params = BTreeMap::new();
         params.insert("oauth_consumer_key".into(), self.client_id.0.clone());
@@ -322,8 +336,11 @@ impl OAuthData {
     }
 }
 
-/// Updates an OAuthData and SigningKey with the response from either the access token or request
+/// Updates an `OAuthData` and `SigningKey` with the response from either the access token or request
 /// token endpoints.
+///
+/// # Errors
+/// Returns an error if the response is invalid.
 pub fn receive_token<'a>(
     data: &'a mut OAuthData,
     key: &mut SigningKey,
@@ -334,6 +351,7 @@ pub fn receive_token<'a>(
         pub oauth_token: String,
         pub oauth_token_secret: String,
     }
+
     let resp: Response = serde_urlencoded::from_str(resp)?;
     let _ = data.token.take();
     let token = &*data.token.get_or_insert(Token(resp.oauth_token));
@@ -342,13 +360,17 @@ pub fn receive_token<'a>(
 }
 
 /// Gets the verifier string from a callback URL.
+///
+/// # Errors
+/// Returns an error if the query string is invalid or missing.
 pub fn get_verifier(callback: &Url) -> Result<String, serde_urlencoded::de::Error> {
-    let query = callback.query().unwrap_or("");
     #[derive(serde::Deserialize)]
     struct Response {
         pub oauth_token: String,
         pub oauth_verifier: String,
     }
+
+    let query = callback.query().unwrap_or("");
     let resp: Response = serde_urlencoded::from_str(query)?;
     Ok(resp.oauth_verifier)
 }

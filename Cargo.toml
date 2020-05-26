@@ -3,6 +3,12 @@ name = "oauth-1a"
 version = "0.1.0"
 authors = ["leo60228 <leo@60228.dev>"]
 edition = "2018"
+description = "OAuth 1.0a client implementation"
+repository = "https://github.com/leo60228/oauth-1a"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+keywords = ["oauth", "auth", "authentication", "client"]
+categories = ["authentication", "cryptography", "network-programming", "web-programming"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
