@@ -8,6 +8,7 @@ use http_types::{Method, Url};
 use percent_encoding::{AsciiSet, PercentEncode, NON_ALPHANUMERIC};
 use rand::distributions::Alphanumeric;
 use rand::prelude::*;
+use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -71,23 +72,27 @@ fn encode_url_parameters(params: &BTreeMap<String, String>) -> String {
 }
 
 /// An OAuth token.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(transparent)]
 pub struct Token(pub String);
 
 /// A client ID.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(transparent)]
 pub struct ClientId(pub String);
 
 /// A client secret.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(transparent)]
 pub struct ClientSecret(pub String);
 
 /// A token secret.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(transparent)]
 pub struct TokenSecret(pub String);
 
 /// A signing key for OAuth.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SigningKey {
     /// The client secret.
     pub client_secret: ClientSecret,
@@ -137,9 +142,10 @@ fn normalize_url(mut url: Url) -> Url {
 }
 
 /// The components of an HTTP request that must be signed.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct SignableRequest {
     /// The request method.
+    #[serde(with = "serde_with::rust::display_fromstr")]
     pub method: Method,
     normalized_url: Url,
     /// The request parameters from all sources.
@@ -204,7 +210,7 @@ impl Signable for SignableRequest {
 }
 
 /// A signing method. RSA-SHA1 is not currently supported.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SignatureMethod {
     /// The HMAC-SHA1 signing method.
     HmacSha1,
@@ -240,7 +246,8 @@ impl fmt::Display for SignatureMethod {
 }
 
 /// A nonce.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(transparent)]
 pub struct Nonce(String);
 
 impl Nonce {
@@ -259,7 +266,7 @@ fn timestamp() -> u64 {
 }
 
 /// The main entrypoint to the API. Non-sensitive data required for all authenticated requests.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OAuthData {
     /// The client ID.
     pub client_id: ClientId,
@@ -272,7 +279,7 @@ pub struct OAuthData {
 }
 
 /// The type of endpoint to generate an Authorization header for.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AuthorizationType {
     /// A request to the request token endpoint.
     RequestToken {
@@ -346,16 +353,16 @@ pub fn receive_token<'a>(
     key: &mut SigningKey,
     resp: &str,
 ) -> Result<&'a Token, serde_urlencoded::de::Error> {
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct Response {
-        pub oauth_token: String,
-        pub oauth_token_secret: String,
+        pub oauth_token: Token,
+        pub oauth_token_secret: TokenSecret,
     }
 
     let resp: Response = serde_urlencoded::from_str(resp)?;
     let _ = data.token.take();
-    let token = &*data.token.get_or_insert(Token(resp.oauth_token));
-    key.token_secret = Some(TokenSecret(resp.oauth_token_secret));
+    let token = &*data.token.get_or_insert(resp.oauth_token);
+    key.token_secret = Some(resp.oauth_token_secret);
     Ok(token)
 }
 
@@ -364,9 +371,9 @@ pub fn receive_token<'a>(
 /// # Errors
 /// Returns an error if the query string is invalid or missing.
 pub fn get_verifier(callback: &Url) -> Result<String, serde_urlencoded::de::Error> {
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct Response {
-        pub oauth_token: String,
+        pub oauth_token: Token,
         pub oauth_verifier: String,
     }
 
